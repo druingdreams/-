@@ -114,10 +114,112 @@
         .table-hover tbody tr:hover {
             background-color: rgba(29, 185, 84, 0.05);
         }
+
+        #additional-charts {
+            width: 100%;
+            display: none;
+            margin: 30px 0;
+        }
+
+        .charts-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-bottom: 20px;
+            width: 100%;
+        }
+
+        .chart-container {
+            flex: 1;
+            min-width: calc(50% - 10px);
+            height: 450px;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        /* 趋势图容器样式 */
+        #trend-chart-container {
+            width: 100%;
+            height: 500px;  /* 增加容器高度 */
+            margin: 30px 0;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-sizing: border-box;
+            position: relative;  /* 添加定位上下文 */
+        }
+
+        #trend-chart {
+            position: absolute;  /* 使用绝对定位 */
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100% !important;
+            height: 100% !important;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        #rank-chart,
+        #growth-chart {
+            width: 100% !important;
+            height: 400px !important;
+        }
+
+        .chart-title {
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 15px;
+            text-align: center;
+            color: #333;
+        }
+
+        /* 确保图表容器在显示时正确布局 */
+        #results-area {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 20px;  /* 添加元素间距 */
+        }
+
+        .table-responsive {
+            margin: 0;
+            width: 100%;
+        }
+
+        /* 统计信息卡片样式 */
+        #artist-stats {
+            margin: 0;
+            padding: 20px 0;
+        }
+
+        #artist-stats .card {
+            height: 100%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        #artist-stats .card-body {
+            padding: 20px;
+        }
     </style>
 </head>
 <body>
     <div class="container mt-4">
+        <!-- 添加加载动画 -->
+        <div id="loading-spinner" class="text-center" style="display: none;">
+            <div class="spinner-border text-success" role="status">
+                <span class="visually-hidden">加载中...</span>
+            </div>
+            <p class="mt-2">数据加载中，请稍候...</p>
+        </div>
+
         <h1 class="text-center mb-4" style="color: #1DB954;">Spotify 数据查询系统</h1>
         
         <!-- 搜索表单 -->
@@ -153,7 +255,7 @@
         </div>
 
         <!-- 结果显示区域 -->
-        <div id="results-area">
+        <div id="results-area" style="display: none;">
             <!-- 歌手统计信息 -->
             <div id="artist-stats" class="card mb-4" style="display: none;">
                 <div class="card-header">歌手统计</div>
@@ -168,11 +270,23 @@
                 </div>
             </div>
 
-            <!-- 趋势图 -->
-            <div class="card">
-                <div class="card-header">数据趋势</div>
-                <div class="card-body">
-                    <div id="trend-chart" style="height: 400px;"></div>
+            <!-- 趋势图容器 -->
+            <div id="trend-chart-container">
+                <div class="chart-title">播放量趋势</div>
+                <div id="trend-chart"></div>
+            </div>
+        </div>
+
+        <!-- 添加新的图表区域 -->
+        <div id="additional-charts">
+            <div class="charts-row">
+                <div class="chart-container">
+                    <div class="chart-title">排名走势</div>
+                    <div id="rank-chart"></div>
+                </div>
+                <div class="chart-container">
+                    <div class="chart-title">日增长率走势</div>
+                    <div id="growth-chart"></div>
                 </div>
             </div>
         </div>
@@ -180,20 +294,41 @@
 
     <script>
     let trendChart = null;
-    let currentData = [];
-    let sortStates = {
-        date: null,
-        streams: null,
-        growth_rate: null
+    let currentData = null;
+    const sortStates = {
+        'date': null,
+        'streams': null,
+        'growth_rate': null,
+        'chart_position': null,
+        'rank_change': null
     };
 
-    // 页面加载完成后初始化图表
+    // 添加新的图表变量
+    let rankChart = null;
+    let growthChart = null;
+
+    // 确保在页面加载完成后初始化所有图表
     document.addEventListener('DOMContentLoaded', function() {
         console.log('初始化图表...');
-        const chartDom = document.getElementById('trend-chart');
-        if (chartDom) {
-            trendChart = echarts.init(chartDom);
-            console.log('图表初始化成功');
+        // 初始化趋势图
+        const trendChartElement = document.getElementById('trend-chart');
+        if (trendChartElement) {
+            trendChart = echarts.init(trendChartElement);
+            console.log('趋势图初始化完成');
+        }
+
+        // 初始化排名走势图
+        const rankChartElement = document.getElementById('rank-chart');
+        if (rankChartElement) {
+            rankChart = echarts.init(rankChartElement);
+            console.log('排名走势图初始化完成');
+        }
+
+        // 初始化增长率走势图
+        const growthChartElement = document.getElementById('growth-chart');
+        if (growthChartElement) {
+            growthChart = echarts.init(growthChartElement);
+            console.log('增长率走势图初始化完成');
         }
     });
 
@@ -207,10 +342,16 @@
         }).replace(/\//g, '-');
     }
 
-    // 添加排序函数
+    // 修改排序函数
     function sortBy(column) {
         console.log('排序列:', column);
+        const searchType = document.getElementById('search-type').value;
         
+        if (!currentData) {
+            console.log('没有数据可排序');
+            return;
+        }
+
         // 更新排序状态
         if (sortStates[column] === null) {
             sortStates[column] = 'asc';
@@ -227,10 +368,13 @@
             }
         });
 
+        // 获取要排序的数据
+        let dataToSort = [...currentData];
+
         // 对数据进行排序
-        currentData.sort((a, b) => {
-            let valueA = a[column];
-            let valueB = b[column];
+        dataToSort.sort((a, b) => {
+            let valueA = column === 'chart_position' ? a.chart_position : a[column];
+            let valueB = column === 'chart_position' ? b.chart_position : b[column];
             
             // 特殊处理日期列
             if (column === 'date') {
@@ -239,7 +383,7 @@
             }
             
             // 特殊处理数值列
-            if (column === 'streams' || column === 'growth_rate') {
+            if (['streams', 'growth_rate', 'chart_position', 'rank_change'].includes(column)) {
                 valueA = valueA === null ? -Infinity : Number(valueA);
                 valueB = valueB === null ? -Infinity : Number(valueB);
             }
@@ -251,24 +395,51 @@
         });
 
         // 更新表格显示
-        const searchType = document.getElementById('search-type').value;
-        updateResultTable(currentData, searchType, currentData.length);
+        currentData = dataToSort;
+        updateResultTable(currentData, searchType, dataToSort.length);
+
+        // 如果是歌曲搜索，更新图表
+        if (searchType === 'song') {
+            updateRankChart(currentData);
+            updateGrowthChart(currentData);
+        }
+
+        // 更新排序图标
+        updateSortIcons();
     }
 
-    // 添加排序图标更新函数
+    // 更新排序图标函数
     function updateSortIcons() {
         Object.keys(sortStates).forEach(column => {
-            const icon = document.getElementById(`${column}-sort-icon`);
-            if (icon) {
+            const iconElement = document.getElementById(`${column}-sort-icon`);
+            if (iconElement) {
                 if (sortStates[column] === null) {
-                    icon.textContent = '▼';
-                    icon.style.opacity = '0.3';
+                    iconElement.innerHTML = '▼';
+                    iconElement.style.opacity = '0.3';
+                } else if (sortStates[column] === 'asc') {
+                    iconElement.innerHTML = '▲';
+                    iconElement.style.opacity = '1';
                 } else {
-                    icon.textContent = sortStates[column] === 'asc' ? '▲' : '▼';
-                    icon.style.opacity = '1';
+                    iconElement.innerHTML = '▼';
+                    iconElement.style.opacity = '1';
                 }
             }
         });
+    }
+
+    // 在表格头部添加排序图标
+    function addSortableHeaders(headerRow) {
+        return headerRow.map(header => {
+            const column = header.toLowerCase().replace(/ /g, '_');
+            if (sortStates.hasOwnProperty(column)) {
+                return `
+                    <th style="cursor: pointer" onclick="sortBy('${column}')">
+                        ${header} <span id="${column}-sort-icon">▼</span>
+                    </th>
+                `;
+            }
+            return `<th>${header}</th>`;
+        }).join('');
     }
 
     // 修改格式化日增长率函数
@@ -282,55 +453,64 @@
         return `${numRate > 0 ? '+' : ''}${numRate.toFixed(2)}%`;
     }
 
-    // 修改表格更新函数中的日增长率显示部分
+    // 修改表格更新函数
     function updateResultTable(data, searchType, totalDays) {
-        console.log('更新表格:', {searchType, dataLength: data.length});
-        currentData = data;
+        console.log('更新表格:', {searchType, data});
         const table = document.getElementById('result-table');
         const artistStats = document.getElementById('artist-stats');
 
         if (searchType === 'artist') {
-            // 歌手搜索结果显示
+            if (!data.data || data.data.length === 0) {
+                table.innerHTML = `
+                    <div class="alert alert-info">
+                        未找到相关数据
+                    </div>
+                `;
+                artistStats.style.display = 'none';
+                return;
+            }
+
+            // 创建表格显示歌手数据
             table.innerHTML = `
-                <table class="table table-hover">
-                    <thead>
-                        <tr>
-                            <th style="cursor: pointer" onclick="sortBy('date')">
-                                日期 <span id="date-sort-icon">▼</span>
-                            </th>
-                            <th>歌曲</th>
-                            <th>歌手</th>
-                            <th style="cursor: pointer" onclick="sortBy('streams')">
-                                播放量 <span id="streams-sort-icon">▼</span>
-                            </th>
-                            <th>排名</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${data.map(item => `
+                <div class="mb-4">
+                    <table class="table table-hover">
+                        <thead>
                             <tr>
-                                <td>${formatDate(item.date)}</td>
-                                <td>${item.track_name}</td>
-                                <td>${item.singer}</td>
-                                <td>${item.streams.toLocaleString()}</td>
-                                <td>${item.rank}</td>
+                                ${addSortableHeaders(['日期', '歌曲', '播放量', '排名', '排名变化', '日增长率'])}
                             </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            ${data.data.map(item => `
+                                <tr>
+                                    <td>${formatDate(item.date)}</td>
+                                    <td>${item.track_name}</td>
+                                    <td>${item.streams.toLocaleString()}</td>
+                                    <td>${item.rank}</td>
+                                    <td class="${item.rank_change > 0 ? 'growth-positive' : item.rank_change < 0 ? 'growth-negative' : ''}">
+                                        ${item.rank_change > 0 ? '+' + item.rank_change : item.rank_change}
+                                    </td>
+                                    <td class="${item.growth_rate > 0 ? 'growth-positive' : item.growth_rate < 0 ? 'growth-negative' : ''}">
+                                        ${formatGrowthRate(item.growth_rate)}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
             `;
 
-            // 显示歌手统计信息
+            // 显示统计信息
             if (artistStats) {
                 artistStats.style.display = 'block';
-                artistStats.innerHTML = `
-                    <div class="card-body">
+                const statsContent = document.getElementById('artist-stats-content');
+                if (statsContent) {
+                    statsContent.innerHTML = `
                         <div class="row">
                             <div class="col-md-4">
                                 <div class="card">
                                     <div class="card-body text-center">
                                         <h5 class="card-title">总播放量</h5>
-                                        <p class="card-text">${data[0]?.total_streams?.toLocaleString() || 0}</p>
+                                        <p class="card-text">${data.total_streams.toLocaleString()}</p>
                                     </div>
                                 </div>
                             </div>
@@ -338,7 +518,7 @@
                                 <div class="card">
                                     <div class="card-body text-center">
                                         <h5 class="card-title">最高播放量</h5>
-                                        <p class="card-text">${data[0]?.max_streams?.toLocaleString() || 0}</p>
+                                        <p class="card-text">${data.max_streams.toLocaleString()}</p>
                                     </div>
                                 </div>
                             </div>
@@ -346,134 +526,420 @@
                                 <div class="card">
                                     <div class="card-body text-center">
                                         <h5 class="card-title">在榜天数</h5>
-                                        <p class="card-text">${totalDays} 天</p>
+                                        <p class="card-text">${data.total_days} 天</p>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                `;
+                    `;
+                }
             }
 
-            // 更新趋势图为每日总播放量
-            if (trendChart) {
-                const dailyData = data.reduce((acc, curr) => {
-                    const date = curr.date;
-                    if (!acc[date]) {
-                        acc[date] = 0;
-                    }
-                    acc[date] += curr.streams;
-                    return acc;
-                }, {});
-
-                const sortedDates = Object.keys(dailyData).sort();
+            // 更新趋势图
+            const trendChartContainer = document.getElementById('trend-chart-container');
+            const trendChartElement = document.getElementById('trend-chart');
+            
+            if (trendChartContainer && trendChartElement) {
+                // 显示容器
+                trendChartContainer.style.display = 'block';
+                
+                // 清除旧的图表实例
+                if (trendChart) {
+                    trendChart.dispose();
+                }
+                
+                // 重新初始化图表
+                trendChart = echarts.init(trendChartElement);
+                
+                // 配置图表选项
                 const option = {
+                    backgroundColor: '#fff',  // 设置背景色
                     title: {
                         text: '每日总播放量趋势',
-                        left: 'center'
+                        left: 'center',
+                        top: '20px'
                     },
                     tooltip: {
                         trigger: 'axis',
                         formatter: function(params) {
-                            return `${params[0].axisValue}<br/>
+                            return `${formatDate(params[0].axisValue)}<br/>
                                     播放量: ${params[0].data.toLocaleString()}`;
                         }
                     },
+                    grid: {
+                        top: '80px',      // 增加顶部空间
+                        left: '80px',     // 增加左侧空间
+                        right: '50px',    // 增加右侧空间
+                        bottom: '80px',   // 增加底部空间
+                        containLabel: true
+                    },
                     xAxis: {
                         type: 'category',
-                        data: sortedDates.map(date => formatDate(date))
+                        data: data.daily_totals.map(item => formatDate(item.date)),
+                        axisLabel: {
+                            rotate: 45,
+                            interval: 'auto',
+                            margin: 15    // 增加标签间距
+                        }
                     },
                     yAxis: {
                         type: 'value',
                         name: '播放量',
+                        nameLocation: 'middle',
+                        nameGap: 50,
                         axisLabel: {
-                            formatter: value => value.toLocaleString()
+                            formatter: value => value.toLocaleString(),
+                            margin: 15    // 增加标签间距
                         }
                     },
                     series: [{
                         name: '总播放量',
                         type: 'line',
-                        data: sortedDates.map(date => dailyData[date]),
+                        data: data.daily_totals.map(item => item.total_streams),
                         smooth: true,
                         areaStyle: {
                             opacity: 0.3
+                        },
+                        lineStyle: {
+                            width: 2
+                        },
+                        itemStyle: {
+                            color: '#1DB954'
                         }
                     }]
                 };
+                
+                // 设置图表选项
                 trendChart.setOption(option);
+                
+                // 强制重绘
+                setTimeout(() => {
+                    trendChart.resize();
+                }, 200);
             }
         } else {
-            // 歌曲搜索的代码保持不变...
+            // 歌曲搜索结果显示
+            artistStats.style.display = 'none';  // 隐藏歌手统计信息
+            table.innerHTML = `
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                ${addSortableHeaders(['日期', '歌曲', '歌手', '播放量', '排名', '排名变化', '日增长率'])}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.map(item => `
+                                <tr>
+                                    <td>${formatDate(item.date)}</td>
+                                    <td>${item.track_name}</td>
+                                    <td>${item.singer}</td>
+                                    <td>${item.streams.toLocaleString()}</td>
+                                    <td>${item.chart_position}</td>
+                                    <td class="${item.rank_change > 0 ? 'growth-positive' : item.rank_change < 0 ? 'growth-negative' : ''}">
+                                        ${item.rank_change > 0 ? '+' + item.rank_change : item.rank_change}
+                                    </td>
+                                    <td class="${item.growth_rate > 0 ? 'growth-positive' : item.growth_rate < 0 ? 'growth-negative' : ''}">
+                                        ${formatGrowthRate(item.growth_rate)}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            // 显示额外图表
+            const additionalCharts = document.getElementById('additional-charts');
+            if (additionalCharts) {
+                // 清除之前的内容
+                additionalCharts.innerHTML = '';
+                additionalCharts.style.display = 'block';
+
+                // 创建图表容器
+                const chartsHTML = `
+                    <div class="charts-row">
+                        <div class="chart-container">
+                            <div class="chart-title">排名走势</div>
+                            <div id="rank-chart"></div>
+                        </div>
+                        <div class="chart-container">
+                            <div class="chart-title">日增长率走势</div>
+                            <div id="growth-chart"></div>
+                        </div>
+                    </div>
+                `;
+                additionalCharts.innerHTML = chartsHTML;
+
+                // 重新初始化图表
+                setTimeout(() => {
+                    // 重新初始化排名走势图
+                    const rankChartElement = document.getElementById('rank-chart');
+                    if (rankChartElement) {
+                        if (rankChart) {
+                            rankChart.dispose();
+                        }
+                        rankChart = echarts.init(rankChartElement);
+                        updateRankChart(data);
+                    }
+
+                    // 重新初始化增长率走势图
+                    const growthChartElement = document.getElementById('growth-chart');
+                    if (growthChartElement) {
+                        if (growthChart) {
+                            growthChart.dispose();
+                        }
+                        growthChart = echarts.init(growthChartElement);
+                        updateGrowthChart(data);
+                    }
+                }, 100);
+            }
+
+            // 更新趋势图
+            const trendChartContainer = document.getElementById('trend-chart-container');
+            const trendChartElement = document.getElementById('trend-chart');
+            
+            if (trendChartContainer && trendChartElement) {
+                trendChartContainer.style.display = 'block';
+                
+                // 确保在初始化前清除旧的实例
+                if (trendChart) {
+                    trendChart.dispose();
+                }
+                
+                // 重新初始化趋势图
+                trendChart = echarts.init(trendChartElement);
+                
+                // 设置图表选项
+                const trackName = data[0].track_name;
+                const option = {
+                    title: {
+                        text: `${trackName} 播放量趋势`,
+                        left: 'center',
+                        top: 10
+                    },
+                    tooltip: {
+                        trigger: 'axis',
+                        formatter: function(params) {
+                            return `${formatDate(params[0].axisValue)}<br/>
+                                    播放量: ${params[0].data.toLocaleString()}`;
+                        }
+                    },
+                    grid: {
+                        top: '60px',
+                        left: '60px',
+                        right: '40px',
+                        bottom: '60px',
+                        containLabel: true
+                    },
+                    xAxis: {
+                        type: 'category',
+                        data: data.map(item => formatDate(item.date)),
+                        axisLabel: {
+                            rotate: 45,
+                            interval: 'auto'
+                        }
+                    },
+                    yAxis: {
+                        type: 'value',
+                        name: '播放量',
+                        nameLocation: 'middle',
+                        nameGap: 50,
+                        axisLabel: {
+                            formatter: value => value.toLocaleString()
+                        }
+                    },
+                    series: [{
+                        name: '播放量',
+                        type: 'line',
+                        data: data.map(item => item.streams),
+                        smooth: true,
+                        areaStyle: {
+                            opacity: 0.3
+                        },
+                        lineStyle: {
+                            width: 2
+                        },
+                        itemStyle: {
+                            color: '#1DB954'
+                        }
+                    }]
+                };
+                
+                // 设置图表选项
+                trendChart.setOption(option);
+                
+                // 强制重绘
+                setTimeout(() => {
+                    trendChart.resize();
+                }, 100);
+            }
         }
+        
+        // 显示结果区域
+        document.getElementById('results-area').style.display = 'block';
+        // 更新排序图标
         updateSortIcons();
     }
 
-    // 更新趋势图
-    function updateTrendChart(data) {
-        if (!trendChart || !data || data.length === 0) {
-            console.log('无法更新趋势图:', {
-                hasChart: !!trendChart,
-                hasData: !!data,
-                dataLength: data ? data.length : 0
-            });
+    // 更新排名走势图
+    function updateRankChart(data) {
+        console.log('开始更新排名走势图', {
+            hasChart: !!rankChart,
+            hasData: !!data,
+            dataLength: data?.length
+        });
+
+        if (!rankChart || !data || data.length === 0) {
+            console.log('无法更新排名走势图');
             return;
         }
-
-        const searchType = document.getElementById('search-type').value;
+        
         const sortedData = [...data].sort((a, b) => new Date(a.date) - new Date(b.date));
-
-        const option = {
-            title: {
-                text: searchType === 'song' ? 
-                    `${data[0].track_name} 播放量趋势` : 
-                    `${data[0].singer} 播放量趋势`,
-                left: 'center'
-            },
-            tooltip: {
-                trigger: 'axis',
-                formatter: function(params) {
-                    return `${formatDate(params[0].axisValue)}<br/>
-                            播放量: ${params[0].data.toLocaleString()}`;
-                }
-            },
-            xAxis: {
-                type: 'category',
-                data: sortedData.map(item => formatDate(item.date))
-            },
-            yAxis: {
-                type: 'value',
-                name: '播放量',
-                axisLabel: {
-                    formatter: value => value.toLocaleString()
-                }
-            },
-            series: [{
-                name: '播放量',
-                type: 'line',
-                data: sortedData.map(item => item.streams),
-                smooth: true,
-                areaStyle: {
-                    opacity: 0.3
-                }
-            }]
-        };
-
-        trendChart.setOption(option);
+        
+        try {
+            const option = {
+                title: {
+                    text: '排名走势',
+                    left: 'center'
+                },
+                tooltip: {
+                    trigger: 'axis',
+                    formatter: function(params) {
+                        return `${formatDate(params[0].axisValue)}<br/>
+                                排名: ${params[0].data}`;
+                    }
+                },
+                grid: {
+                    left: '5%',
+                    right: '5%',
+                    bottom: '10%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    data: sortedData.map(item => formatDate(item.date)),
+                    axisLabel: {
+                        rotate: 45
+                    }
+                },
+                yAxis: {
+                    type: 'value',
+                    name: '排名',
+                    inverse: true,
+                    axisLabel: {
+                        formatter: value => value.toFixed(0)
+                    }
+                },
+                series: [{
+                    name: '排名',
+                    type: 'line',
+                    data: sortedData.map(item => item.chart_position),
+                    smooth: true,
+                    markPoint: {
+                        data: [
+                            {type: 'min', name: '最高排名'},
+                            {type: 'max', name: '最低排名'}
+                        ]
+                    },
+                    lineStyle: {
+                        color: '#1DB954'
+                    },
+                    itemStyle: {
+                        color: '#1DB954'
+                    }
+                }]
+            };
+            rankChart.setOption(option);
+            console.log('排名走势图更新成功');
+        } catch (error) {
+            console.error('更新排名走势图时出错:', error);
+        }
     }
 
-    // 处理表单提交
+    // 更新日增长率走势图
+    function updateGrowthChart(data) {
+        if (!growthChart || !data || data.length === 0) return;
+        
+        const sortedData = [...data].sort((a, b) => new Date(a.date) - new Date(b.date));
+        
+        try {
+            const option = {
+                title: {
+                    text: '日增长率走势',
+                    left: 'center'
+                },
+                tooltip: {
+                    trigger: 'axis',
+                    formatter: function(params) {
+                        return `${formatDate(params[0].axisValue)}<br/>
+                                增长率: ${formatGrowthRate(params[0].data)}`;
+                    }
+                },
+                grid: {
+                    left: '5%',
+                    right: '5%',
+                    bottom: '10%',
+                    top: '15%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    data: sortedData.map(item => formatDate(item.date)),
+                    axisLabel: {
+                        rotate: 45,
+                        interval: Math.floor(sortedData.length / 10)  // 动态调整标签间隔
+                    }
+                },
+                yAxis: {
+                    type: 'value',
+                    name: '增长率(%)',
+                    axisLabel: {
+                        formatter: value => `${value}%`
+                    }
+                },
+                series: [{
+                    name: '增长率',
+                    type: 'bar',
+                    data: sortedData.map(item => item.growth_rate),
+                    itemStyle: {
+                        color: function(params) {
+                            return params.data >= 0 ? '#1DB954' : '#dc3545';
+                        }
+                    },
+                    label: {
+                        show: true,
+                        position: 'top',
+                        formatter: params => formatGrowthRate(params.data),
+                        fontSize: 10
+                    },
+                    barWidth: '60%'
+                }]
+            };
+            growthChart.setOption(option);
+        } catch (error) {
+            console.error('更新增长率走势图时出错:', error);
+        }
+    }
+
+    // 修改表单提交处理函数
     document.getElementById('search-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        console.log('提交搜索...');
-
-        const formData = new FormData();
-        const searchType = document.getElementById('search-type').value;
-        formData.append('search_type', searchType);
-        formData.append('search_term', document.getElementById('search-term').value);
-        formData.append('start_date', document.getElementById('start-date').value);
-        formData.append('end_date', document.getElementById('end-date').value);
+        console.log('开始搜索...');
+        
+        // 显示加载动画
+        document.getElementById('loading-spinner').style.display = 'block';
+        document.getElementById('results-area').style.display = 'none';
+        document.getElementById('additional-charts').style.display = 'none';
 
         try {
+            const formData = new FormData();
+            const searchType = document.getElementById('search-type').value;
+            formData.append('search_type', searchType);
+            formData.append('search_term', document.getElementById('search-term').value);
+            formData.append('start_date', document.getElementById('start-date').value);
+            formData.append('end_date', document.getElementById('end-date').value);
+
             const response = await fetch('/search', {
                 method: 'POST',
                 body: formData
@@ -482,18 +948,61 @@
             console.log('搜索结果:', data);
 
             if (data.status === 'success') {
-                updateResultTable(data.data, searchType, data.total_days);
-                updateTrendChart(data.data);
+                // 存储当前数据用于排序
+                if (searchType === 'artist') {
+                    currentData = data;
+                    updateResultTable(data, searchType, data.total_days);
+                } else {
+                    // 歌曲搜索
+                    if (!data.data || data.data.length === 0) {
+                        document.getElementById('result-table').innerHTML = `
+                            <div class="alert alert-info">
+                                未找到相关数据
+                            </div>
+                        `;
+                        return;
+                    }
+                    currentData = data.data;
+                    updateResultTable(data.data, searchType, data.total_days);
+                    
+                    // 显示额外图表
+                    document.getElementById('additional-charts').style.display = 'block';
+                    // 更新排名和增长率图表
+                    updateRankChart(data.data);
+                    updateGrowthChart(data.data);
+                }
+                
+                // 显示结果区域
+                document.getElementById('results-area').style.display = 'block';
+            } else {
+                document.getElementById('result-table').innerHTML = `
+                    <div class="alert alert-danger">
+                        查询失败：${data.message || '未知错误'}
+                    </div>
+                `;
             }
         } catch (error) {
             console.error('搜索错误:', error);
+            document.getElementById('result-table').innerHTML = `
+                <div class="alert alert-danger">
+                    查询出错：${error.message}
+                </div>
+            `;
+        } finally {
+            document.getElementById('loading-spinner').style.display = 'none';
         }
     });
 
-    // 窗口大小改变时重绘图表
-    window.addEventListener('resize', function() {
+    // 在窗口大小改变时重新调整图表大小
+    window.addEventListener('resize', () => {
         if (trendChart) {
             trendChart.resize();
+        }
+        if (rankChart) {
+            rankChart.resize();
+        }
+        if (growthChart) {
+            growthChart.resize();
         }
     });
     </script>

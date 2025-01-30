@@ -78,7 +78,7 @@ def search():
         start_date = request.form.get('start_date')
         end_date = request.form.get('end_date')
 
-        print(f"搜索参数: type={search_type}, term={search_term}, start={start_date}, end={end_date}")
+        print(f"搜索参数: type={search_type}, term='{search_term}', start={start_date}, end={end_date}")
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -91,12 +91,12 @@ def search():
                     SELECT date, track_name, singer, streams, chart_rank
                     FROM spotify_charts
                     WHERE track_name = %s
-                    AND date BETWEEN %s AND %s
+                    AND date BETWEEN DATE_SUB(%s, INTERVAL 1 DAY) AND %s
                     UNION ALL
                     SELECT date, track_name, singer, streams, chart_rank
                     FROM spotify_charts1
                     WHERE track_name = %s
-                    AND date BETWEEN %s AND %s
+                    AND date BETWEEN DATE_SUB(%s, INTERVAL 1 DAY) AND %s
                 ) all_data
                 ORDER BY date
             ),
@@ -108,6 +108,7 @@ def search():
                     streams,
                     chart_rank,
                     LAG(streams) OVER (ORDER BY date) as prev_streams,
+                    LAG(chart_rank) OVER (ORDER BY date) as prev_rank,
                     LAG(date) OVER (ORDER BY date) as prev_date
                 FROM combined_data
             )
@@ -122,68 +123,108 @@ def search():
                     WHEN prev_streams = 0 THEN NULL
                     WHEN DATEDIFF(date, prev_date) > 1 THEN NULL
                     ELSE ROUND(((streams - prev_streams) * 100.0 / prev_streams), 2)
-                END as growth_rate
+                END as growth_rate,
+                CASE 
+                    WHEN prev_rank IS NULL THEN 0
+                    ELSE prev_rank - chart_rank
+                END as rank_change
             FROM daily_change
+            WHERE date >= %s
             ORDER BY date DESC
             """
             
             cursor.execute(query, (
                 search_term, start_date, end_date,
-                search_term, start_date, end_date
+                search_term, start_date, end_date,
+                start_date
             ))
             
             results = cursor.fetchall()
-            print(f"查询结果数量: {len(results)}")
-            
-            if results:
-                print(f"第一条记录: {results[0]}")
+            data = [{
+                'date': row[0].strftime('%Y-%m-%d') if row[0] else '',
+                'track_name': row[1],
+                'singer': row[2],
+                'streams': row[3],
+                'chart_position': row[4],
+                'growth_rate': float(row[5]) if row[5] is not None else None,
+                'rank_change': row[6]
+            } for row in results]
 
+            return jsonify({
+                'status': 'success',
+                'data': data,
+                'total_days': len(results)
+            })
+
+        else:
+            # 歌手搜索查询
+            query = """
+            WITH combined_data AS (
+                SELECT date, track_name, singer, streams, chart_rank
+                FROM (
+                    SELECT date, track_name, singer, streams, chart_rank
+                    FROM spotify_charts
+                    WHERE singer LIKE %s
+                    AND date BETWEEN DATE_SUB(%s, INTERVAL 1 DAY) AND %s
+                    UNION ALL
+                    SELECT date, track_name, singer, streams, chart_rank
+                    FROM spotify_charts1
+                    WHERE singer LIKE %s
+                    AND date BETWEEN DATE_SUB(%s, INTERVAL 1 DAY) AND %s
+                ) all_data
+                ORDER BY date, track_name
+            ),
+            daily_change AS (
+                SELECT 
+                    date,
+                    track_name,
+                    singer,
+                    streams,
+                    chart_rank,
+                    LAG(streams) OVER (PARTITION BY track_name ORDER BY date) as prev_streams,
+                    LAG(chart_rank) OVER (PARTITION BY track_name ORDER BY date) as prev_rank,
+                    LAG(date) OVER (PARTITION BY track_name ORDER BY date) as prev_date
+                FROM combined_data
+            )
+            SELECT 
+                date,
+                track_name,
+                singer,
+                streams,
+                chart_rank,
+                CASE 
+                    WHEN prev_streams IS NULL THEN NULL
+                    WHEN prev_streams = 0 THEN NULL
+                    WHEN DATEDIFF(date, prev_date) > 1 THEN NULL
+                    ELSE ROUND(((streams - prev_streams) * 100.0 / prev_streams), 2)
+                END as growth_rate,
+                CASE 
+                    WHEN prev_rank IS NULL THEN 0
+                    ELSE prev_rank - chart_rank
+                END as rank_change
+            FROM daily_change
+            WHERE date >= %s
+            ORDER BY date DESC, streams DESC
+            """
+            
+            cursor.execute(query, (
+                f'%{search_term}%', start_date, end_date,
+                f'%{search_term}%', start_date, end_date,
+                start_date
+            ))
+            
+            results = cursor.fetchall()
             data = [{
                 'date': row[0].strftime('%Y-%m-%d') if row[0] else '',
                 'track_name': row[1],
                 'singer': row[2],
                 'streams': row[3],
                 'rank': row[4],
-                'growth_rate': float(row[5]) if row[5] is not None else None
+                'growth_rate': float(row[5]) if row[5] is not None else None,
+                'rank_change': row[6]
             } for row in results]
 
-            if data:
-                print(f"处理后的第一条记录: {data[0]}")
-
-            return jsonify({
-                'status': 'success',
-                'data': data,
-                'search_type': 'song',
-                'total_days': len(results)
-            })
-        else:
-            query = """
-            (SELECT date, track_name, singer, streams, chart_rank
-            FROM spotify_charts
-            WHERE singer LIKE %s
-            AND date BETWEEN %s AND %s)
-            UNION
-            (SELECT date, track_name, singer, streams, chart_rank
-            FROM spotify_charts1
-            WHERE singer LIKE %s
-            AND date BETWEEN %s AND %s)
-            ORDER BY date DESC, streams DESC
-            """
-            cursor.execute(query, (
-                f'%{search_term}%', start_date, end_date,
-                f'%{search_term}%', start_date, end_date
-            ))
-            
-            results = cursor.fetchall()
-            data = [{
-                'date': row[0].strftime('%Y-%m-%d') if row[0] else '',
-                'track_name': row[1],
-                'singer': row[2],
-                'streams': row[3],
-                'rank': row[4]
-            } for row in results]
-
-            # 获取每日总播放量数据
+            # 获取每日总播放量
             daily_total_query = """
             SELECT date, SUM(streams) as total_streams
             FROM (
@@ -198,76 +239,20 @@ def search():
                 AND date BETWEEN %s AND %s
             ) combined_data
             GROUP BY date
-            ORDER BY date
+            ORDER BY date DESC
             """
+            
             cursor.execute(daily_total_query, (
                 f'%{search_term}%', start_date, end_date,
                 f'%{search_term}%', start_date, end_date
             ))
+            
             daily_totals = cursor.fetchall()
-
-            # 计算总播放量
-            total_streams_query = """
-            SELECT SUM(streams) as total_streams
-            FROM (
-                SELECT streams
-                FROM spotify_charts
-                WHERE singer LIKE %s
-                AND date BETWEEN %s AND %s
-                UNION ALL
-                SELECT streams
-                FROM spotify_charts1
-                WHERE singer LIKE %s
-                AND date BETWEEN %s AND %s
-            ) combined_data
-            """
-            cursor.execute(total_streams_query, (
-                f'%{search_term}%', start_date, end_date,
-                f'%{search_term}%', start_date, end_date
-            ))
-            total_streams = cursor.fetchone()[0] or 0
-
-            # 计算最高播放量
-            max_streams_query = """
-            SELECT MAX(streams) as max_streams
-            FROM (
-                SELECT streams
-                FROM spotify_charts
-                WHERE singer LIKE %s
-                AND date BETWEEN %s AND %s
-                UNION ALL
-                SELECT streams
-                FROM spotify_charts1
-                WHERE singer LIKE %s
-                AND date BETWEEN %s AND %s
-            ) combined_data
-            """
-            cursor.execute(max_streams_query, (
-                f'%{search_term}%', start_date, end_date,
-                f'%{search_term}%', start_date, end_date
-            ))
-            max_streams = cursor.fetchone()[0] or 0
-
-            # 计算在榜天数
-            total_days_query = """
-            SELECT COUNT(DISTINCT date) as total_days
-            FROM (
-                SELECT date
-                FROM spotify_charts
-                WHERE singer LIKE %s
-                AND date BETWEEN %s AND %s
-                UNION
-                SELECT date
-                FROM spotify_charts1
-                WHERE singer LIKE %s
-                AND date BETWEEN %s AND %s
-            ) combined_data
-            """
-            cursor.execute(total_days_query, (
-                f'%{search_term}%', start_date, end_date,
-                f'%{search_term}%', start_date, end_date
-            ))
-            total_days = cursor.fetchone()[0] or 0
+            
+            # 计算统计数据
+            total_streams = sum(row[1] for row in daily_totals)
+            max_streams = max(row[1] for row in daily_totals) if daily_totals else 0
+            total_days = len(daily_totals)
 
             return jsonify({
                 'status': 'success',
@@ -284,7 +269,12 @@ def search():
 
     except Exception as e:
         print(f"搜索错误: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)})
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'data': [],
+            'total_days': 0
+        })
     finally:
         cursor.close()
         conn.close()
@@ -399,34 +389,71 @@ def get_daily_total():
                 'growth_rate': row[5]  # 可能为 None
             } for row in results]
         else:
-            # 原有的歌手每日总播放量查询逻辑
+            # 歌手搜索查询
             query = """
-            SELECT date, SUM(streams) as total_streams
-            FROM (
-                SELECT date, streams, singer
-                FROM spotify_charts
-                WHERE singer LIKE %s
-                UNION ALL
-                SELECT date, streams, singer
-                FROM spotify_charts1
-                WHERE singer LIKE %s
-            ) combined_data
-            GROUP BY date
-            ORDER BY date
+            WITH combined_data AS (
+                SELECT date, track_name, singer, streams, chart_rank
+                FROM (
+                    SELECT date, track_name, singer, streams, chart_rank
+                    FROM spotify_charts
+                    WHERE singer LIKE %s
+                    AND date BETWEEN DATE_SUB(%s, INTERVAL 1 DAY) AND %s
+                    UNION ALL
+                    SELECT date, track_name, singer, streams, chart_rank
+                    FROM spotify_charts1
+                    WHERE singer LIKE %s
+                    AND date BETWEEN DATE_SUB(%s, INTERVAL 1 DAY) AND %s
+                ) all_data
+                ORDER BY date, track_name
+            ),
+            daily_change AS (
+                SELECT 
+                    date,
+                    track_name,
+                    singer,
+                    streams,
+                    chart_rank,
+                    LAG(streams) OVER (PARTITION BY track_name ORDER BY date) as prev_streams,
+                    LAG(chart_rank) OVER (PARTITION BY track_name ORDER BY date) as prev_rank,
+                    LAG(date) OVER (PARTITION BY track_name ORDER BY date) as prev_date
+                FROM combined_data
+            )
+            SELECT 
+                date,
+                track_name,
+                singer,
+                streams,
+                chart_rank as rank,
+                CASE 
+                    WHEN prev_streams IS NULL THEN NULL
+                    WHEN prev_streams = 0 THEN NULL
+                    WHEN DATEDIFF(date, prev_date) > 1 THEN NULL
+                    ELSE ROUND(((streams - prev_streams) * 100.0 / prev_streams), 2)
+                END as growth_rate,
+                CASE 
+                    WHEN prev_rank IS NULL THEN 0
+                    ELSE prev_rank - chart_rank
+                END as rank_change
+            FROM daily_change
+            WHERE date >= %s
+            ORDER BY date DESC, streams DESC
             """
-            cursor.execute(query, (f'%{search_term}%', f'%{search_term}%'))
-        
-        results = cursor.fetchall()
-        
-        if search_type == 'song':
+            
+            cursor.execute(query, (
+                f'%{search_term}%', start_date, end_date,
+                f'%{search_term}%', start_date, end_date,
+                start_date
+            ))
+            
+            results = cursor.fetchall()
             data = [{
-                'date': row[0].strftime('%Y-%m-%d'),
-                'growth_rate': round(row[1], 2)
-            } for row in results]
-        else:
-            data = [{
-                'date': row[0].strftime('%Y-%m-%d'),
-                'total_streams': row[1]
+                'date': row[0].strftime('%Y-%m-%d') if row[0] else '',
+                'track_name': row[1],
+                'singer': row[2],
+                'streams': row[3],
+                'rank': row[4],
+                'growth_rate': float(row[5]) if row[5] is not None else None,
+                'rank_change': row[6]
             } for row in results]
 
         return jsonify({
